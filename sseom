@@ -3,7 +3,7 @@
 # This script will can be called on all of the nodes in the cluster to execute  #
 # a command, but it will only execute on the manager node.                      #
 #-------------------------------------------------------------------------------#
-# Source: https://github.com/ckerner/gpfs-shell-functions.git                   #
+# Source: https://github.com/ckerner/sseom.git                                  #
 #-------------------------------------------------------------------------------#
 # Chad Kerner - ckerner@illinois.edu - chad.kerner@gmail.com                    #
 # Senior Storage Engineer, Storage Enabling Technologies                        #
@@ -12,6 +12,78 @@
 #===============================================================================#
 
 PROG=`basename $0`
+
+
+#===============================================================================#
+# Function: is_node_gpfs_manager                                                #
+#    Usage: Check the current host to see if it is the GPFS manager node.  .    #
+#-------------------------------------------------------------------------------#
+# Parameter: None                                                               #
+# Returns: 0 - If the current host is the GPFS manager node.                    #
+#          1 - If the current host is not the GPFS manager node.                #
+#===============================================================================#
+function is_node_gpfs_manager {
+   #HOSTNAME=`hostname -s`
+   HOSTNAME=`/usr/lpp/mmfs/bin/mmgetstate -Y | grep -v HEAD | awk -F: '{print($7)}'`
+   MANAGER=`/usr/lpp/mmfs/bin/mmlsmgr -c 2>/dev/null| awk '{print($5)}' | sed -e 's/(//g' -e 's/)//g'`
+
+   RESULT=`echo ${MANAGER} | grep ${HOSTNAME} | wc -l`
+   if [ ${RESULT} -ge 1 ] ; then
+      return 0
+   else
+      return 1
+   fi
+}
+
+
+function is_lock_set {
+   LOCKFILE=$1
+   if [ -f /var/run/${LOCKFILE} ] ; then
+      return 0
+   else
+      return 1
+   fi
+}
+
+
+function set_lock {
+   LOCKFILE=$1
+   if [ ! -f /var/run/${LOCKFILE} ] ; then
+      touch /var/run/${LOCKFILE}
+   fi
+}
+
+function remove_lock {
+   LOCKFILE=$1
+   if [ -f /var/run/${LOCKFILE} ] ; then
+      rm -f /var/run/${LOCKFILE} &>/dev/null
+   fi
+}
+
+function gen_lock_name {
+   MYCMD="$*"
+   #echo ${MYCMD} | md5sum | awk '{print($1)}'
+   echo ${MYCMD} | sed -e 's/\//_/g' | awk '{print($1)}'
+}
+
+function get_lock_count {
+   LOCKFILE=$1
+   COUNT=0
+   if [ -f /var/run/${LOCKFILE} ] ; then
+      COUNT=`wc -l /var/run/${LOCKFILE} | awk '{print($1)}'`
+   fi
+   echo ${COUNT}
+}
+
+function log_to_lockfile {
+   LOCKFILE=$1
+   shift
+   MYMSG="$*"
+
+   echo "${MYMSG}" >> /var/run/${LOCKFILE}
+}
+
+
 if [ "x$1" == "x" ] ; then
 
    cat <<EOHELP
@@ -37,14 +109,6 @@ fi
 
 MYCMD="$*"
 BC=`which bc 2>/dev/null`
-
-# Are the helper functions installed.
-if [[ -e /var/mmfs/etc/gpfs_functions ]] ; then
-   source /var/mmfs/etc/gpfs_functions
-else
-   echo "/var/mmfs/etc/gpfs_functions not installed."
-   exit 1
-fi
 
 if [ "${MYCMD}" == "--maint" ] ; then
    set_lock gpfs_maintenance
